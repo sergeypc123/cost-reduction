@@ -1,0 +1,61 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+LAYOUT_WITH_LEGEND()
+
+title AS-IS (уточнённая): кассовая зона и интеграция магазинов VitaStore
+
+Person(cashier, "Кассир", "Сотрудник магазина")
+Person(engineer, "Выездной ИТ-инженер", "Настраивает серверы, снимает выгрузки")
+Person(merch, "Товаровед HQ", "Сводит номенклатуру вручную")
+
+System_Boundary(hq, "Центральный офис (on-premises ЦОД)") {
+  Container(sap, "SAP ERP", "SAP, on-premises", "Товары, цены, кадры, финансы")
+  Container(promo, "Promo Engine", "Собственная разработка", "Промоакции")
+  Container(sf, "Smart Fulfillment", "Собственная разработка", "Click & Collect")
+  Container(ftp, "FTP-сервер", "FTP", "Ночная рассылка прайс-листов")
+  Container(mail, "Почтовый ящик data-integration@", "E-mail", "Приём выгрузок из магазинов")
+}
+
+System_Boundary(store, "Магазин (×500, у купленных сетей своё ПО)") {
+  Container(pos, "POS App (толстый клиент)", "Windows, C#", "Бизнес-логика кассы и драйверы устройств в одном приложении")
+  ContainerDb(localdb, "Local DB на сервере в подсобке", "MS SQL Express / PostgreSQL", "Чеки, справочники, цены") <<SPOF>>
+  Container(fr, "Фискальный регистратор", "ККТ, COM-port", "Печать чеков")
+  Container(term, "Банковские терминалы", "Ingenico, Сбер (ARCUS-2), Альфа, Verifone", "Свой протокол и драйвер у каждого")
+}
+
+Rel(cashier, pos, "Работает с кассой", "UI")
+Rel(pos, localdb, "Читает цены, пишет чеки", "синхронно")
+Rel(pos, fr, "Печать чека", "COM-драйвер")
+Rel(pos, term, "Оплата картой", "USB/COM, драйвер под модель")
+Rel(pos, sap, "Проверка карты лояльности", "онлайн-запрос, без офлайн-режима")
+
+Rel(sap, ftp, "Пакет цен и номенклатуры (XML)", "batch, 02:00")
+Rel(localdb, ftp, "Забирает пакет обновлений", "FTP, ночью")
+
+Rel(engineer, pos, "Снимает дамп товаров (CSV/XLS)", "вручную, на месте")
+Rel(engineer, mail, "Отправляет файл", "e-mail")
+Rel(merch, mail, "Получает файл", "e-mail")
+Rel(merch, sap, "Загружает сведённую таблицу", "вручную, Excel/VLOOKUP")
+
+note right of pos
+  **Проблемы**
+  - драйверы встроены в кассу: новый терминал
+    = 3 недели разработки (INC-8415)
+  - лояльность падает без интернета (INC-8402)
+end note
+
+note right of localdb
+  **Единая точка отказа**
+  Отказ диска = магазин стоит 4–6 часов,
+  ждёт выезда инженера (INC-8433).
+  Платные лицензии Windows Server и SQL
+end note
+
+note bottom of ftp
+  **Отличие от схемы на вики**
+  На вики нарисован real-time REST
+  между кассой и SAP. На деле прайсы идут
+  ночным файлом по FTP, а номенклатура
+  сводится вручную (артефакты 2 и 3)
+end note
+@enduml

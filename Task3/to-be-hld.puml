@@ -1,0 +1,68 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+LAYOUT_WITH_LEGEND()
+
+title TO-BE (HLD): облачная касса VitaStore с HAL и офлайн-режимом
+
+Person(cashier, "Кассир", "Работает на планшете")
+
+System_Boundary(edge, "Магазин (Edge)") {
+  Container(webpos, "Web POS", "PWA на планшете", "Интерфейс кассы. Кеш каталога и цен, очередь офлайн-чеков (IndexedDB)")
+  Container(hub, "Store Edge Hub", "Мини-ПК / Android-бокс, Docker", "Локальный агент магазина")
+  Container(hal, "HAL / Device Gateway", "Сервис на Edge Hub, локальный REST/WebSocket", "Единый API для оборудования: pay(), refund(), printReceipt()")
+  Container(adapters, "Адаптеры устройств", "Плагины на SDK производителей", "Сбер ARCUS-2, Альфа, Ingenico, Verifone, ККТ АТОЛ/Штрих")
+  ContainerDb(edgedb, "Локальный кеш и outbox", "SQLite", "Каталог, цены, промо, снимок лояльности; очередь неотправленных чеков")
+  Container(sync, "Sync Agent", "Сервис на Edge Hub", "Отправка outbox и получение обновлений при наличии связи")
+  Container(fr, "Фискальный регистратор с ФН", "ККТ", "Фискализация, хранит чеки до отправки в ОФД")
+  Container(term, "Банковские терминалы", "Разные модели", "Оплата картой")
+}
+
+System_Boundary(cloud, "Облако (российский провайдер)") {
+  Container(apigw, "API Gateway", "Managed", "Единая точка входа, аутентификация устройств")
+  Container(posbe, "Cloud POS Backend", "SaaS", "Продажи, чеки, смены, ценники")
+  Container(catalog, "Catalog & Price Service", "PaaS", "Номенклатура и цены магазинов, публикация изменений")
+  Container(loyalty, "Loyalty Platform", "SaaS", "Карты, баллы, офлайн-лимиты")
+  Container(payrouter, "Payment Gateway", "Облачный сервис", "Конфигурация терминалов, маршрутизация эквайринга, СБП")
+  Container(promo, "Promo Engine", "PaaS, managed K8s + PostgreSQL", "Промоакции")
+  Container(sf, "Smart Fulfillment", "PaaS", "Click & Collect")
+  ContainerQueue(bus, "Брокер событий", "Managed Kafka", "Чеки, остатки, изменения цен")
+  Container(dip, "Data Integration Platform + ИИ-маппинг", "PaaS", "Онбординг магазинов (Task2)")
+  Container(mdm, "MDM / мониторинг", "SaaS", "Удалённое управление планшетами и Edge Hub")
+}
+
+System_Ext(sap, "SAP ERP (on-premises HQ)", "Товары, финансы, кадры")
+System_Ext(ofd, "ОФД", "Оператор фискальных данных")
+System_Ext(bank, "Банк-эквайер", "Процессинг карт")
+
+Rel(cashier, webpos, "Пробивает чек")
+Rel(webpos, hal, "pay / printReceipt", "локальный REST/WebSocket")
+Rel(hal, adapters, "Вызов адаптера по модели")
+Rel(adapters, term, "Протокол производителя", "USB/COM/LAN")
+Rel(adapters, fr, "Фискализация", "USB/COM")
+Rel(fr, ofd, "Фискальные документы", "сам, когда есть связь")
+Rel(term, bank, "Авторизация", "свой канал/LTE")
+Rel(webpos, edgedb, "Чтение каталога, запись офлайн-чеков")
+Rel(sync, edgedb, "Outbox и обновления")
+Rel(sync, apigw, "Отправка чеков, получение дельт", "HTTPS, идемпотентно")
+Rel(webpos, apigw, "Онлайн-работа", "HTTPS")
+
+Rel(apigw, posbe, "Чеки, смены")
+Rel(apigw, loyalty, "Начисление и списание баллов")
+Rel(apigw, catalog, "Дельты каталога и цен")
+Rel(hal, payrouter, "Профиль терминала, обновления адаптеров", "HTTPS")
+Rel(posbe, bus, "События продаж")
+Rel(catalog, bus, "Изменения цен")
+Rel(promo, catalog, "Промо-цены")
+Rel(bus, sf, "Остатки магазинов")
+Rel(bus, sap, "Продажи и остатки", "интеграция, near real-time")
+Rel(sap, catalog, "Эталонная номенклатура и цены", "интеграция")
+Rel(dip, sap, "Сопоставления SKU")
+Rel(mdm, hub, "Управление и обновления")
+
+note right of hal
+  **Слой абстракции оборудования**
+  Касса знает только pay/refund/print.
+  Новый терминал = новый адаптер,
+  кассовое ПО не пересобирается
+end note
+@enduml
